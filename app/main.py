@@ -1,10 +1,11 @@
 from typing import Union, Optional
 from fastapi import FastAPI, Body, Response, status, HTTPException
 from pydantic import BaseModel
-from random import randrange
+import random
 from psycopg2.extras import RealDictCursor
 import psycopg2
 import time
+from psycopg2 import pool
 
 
 
@@ -16,24 +17,15 @@ class Post(BaseModel):
     content: str
     published: bool = False
     
-while True:
-
-        try:
-            conn = psycopg2.connect(
-                host='localhost',
-                database='FastAPI',
-                user='postgres',
-                password='password123',
-                cursor_factory=RealDictCursor 
-            )
-            cursor = conn.cursor() 
-            print ("Connection established")
-            break
-
-        except psycopg2.Error as e:
-            print("Unable to connect to the database")
-            print(e)
-            time.sleep(2)
+db_pool = psycopg2.pool.SimpleConnectionPool(
+        minconn=1,
+        maxconn=5000,
+        host='localhost',
+        database='FastAPI',
+        user='postgres',
+        password='password123',
+        cursor_factory=RealDictCursor 
+)
    
 
     
@@ -53,53 +45,109 @@ my_posts = [
 
 @app.get("/")
 def get_all_posts():
-    cursor.execute("SELECT * FROM posts")
-    posts = cursor.fetchall()
-    print(posts)
-    return {"posts": posts}
+    conn = db_pool.getconn()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT * FROM posts")
+            posts = cursor.fetchall()
+            print(posts)
+        return {"posts": posts}
+    except Exception as e:
+        print(e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+    finally:
+        db_pool.putconn(conn)
 
 @app.get("/{id}")
 def get_post(id: int):
-    for post in my_posts:
-        if post["id"] == id:
-            return {"data": post}
-    
-    # Raise an HTTP 404 exception if the loop completes without finding a matching post
-    raise HTTPException(status_code=404, detail=f"Post with Id :{id} not found")
+    conn = db_pool.getconn()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT * FROM posts WHERE id = %s", (id,))
+            post = cursor.fetchone()
 
-@app.post("/create", status_code= status.HTTP_201_CREATED)
+            if post:
+                return {"data": post}
+
+            raise HTTPException(status_code=404, detail=f"Post with Id {id} not found")
+    except Exception as e:
+        print(e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+    finally:
+        db_pool.putconn(conn)
+
+@app.post("/post", status_code= status.HTTP_201_CREATED)
 def create_post(post: Post):
-    post_dict = post.dict()
-    post_dict["id"] = randrange(0,100000)
-    my_posts.append(post_dict)
-    return {"data": post_dict}
-
-@app.put("/update/{id}", status_code= status.HTTP_200_OK)
-def update_post(post_id: int, updated_post: Post):
-    # Find the post with the given post_id in my_posts
-    for post in my_posts:
-        if post["id"] == id:
-            # Update the post with the new data from updated_post
-            post.update(updated_post.dict())
-            return {"message": f"Post with ID {post_id} has been updated.", "data": post}
     
-    # If the post with the given post_id is not found, return an error
-    raise HTTPException(status_code=404, detail=f"Post with Id :{id} not found")
+    
+    post_id = random.randrange(0, 100000)
+    new_post = post.dict()
+    new_post['id'] = post_id
+    conn = db_pool.getconn()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO posts (id, title, content, published) VALUES (%s, %s, %s, %s) RETURNING *",
+                (post_id, post.title, post.content, post.published)
+            )
+            conn.commit()  # Commit the transaction
+            created_post = cursor.fetchone()  # Get the created post with all columns
+            return {"data": created_post}
+    except psycopg2.Error as e:
+        conn.rollback()  # Rollback the transaction on error
+        print(e)
+        raise HTTPException(status_code=400, detail="An error occurred while inserting the post.")
+    
+    
+
+@app.put("/update/{id}", status_code=200)
+def update_post(id: int, updated_post: Post):
+        
+    conn = db_pool.getconn()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(f"SELECT * FROM posts WHERE id = {id}")
+            existing_post = cursor.fetchone()
+
+            if existing_post:
+                # Update the post with the new data from updated_post
+                cursor.execute("UPDATE posts SET title = %s, content = %s WHERE id = %s", 
+                    (updated_post.title, updated_post.content, id))
 
 
-@app.delete("/delete/{id}", status_code= status.HTTP_204_NO_CONTENT)
+                conn.commit()
+                return {"message": f"Post with ID {id} has been updated.", "data": updated_post}
+            else:
+                raise HTTPException(status_code=404, detail=f"Post with ID {id} not found")
+    except Exception as e:
+        print(e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+    finally:
+        conn.close()
+
+
+@app.delete("/delete/{id}", status_code=204)
 def delete_post(id: int):
-    for post in my_posts:
-       if post["id"] == id:
-           my_posts.remove(post) 
-           return HTTPException(status_code=204, detail=f"Post with Id :{id} deleted successfully")
+    conn = db_pool.getconn()
+    try:
+        with conn.cursor() as cursor:  # Create and manage the cursor within the context
+            cursor.execute(f"SELECT * FROM posts WHERE id = {id}")
+            existing_post = cursor.fetchone()
 
-       else:
-           return Response(status_code=status.HTTP_404_NOT_FOUND)
-      
-    raise HTTPException(status_code=404, detail=f"Post with Id :{id} not found")
-
-    
+            if existing_post:
+                # Delete the post with the specified ID
+                cursor.execute(f"DELETE FROM posts WHERE id = {id}")
+                conn.commit()
+            else:
+                raise HTTPException(status_code=404, detail=f"Post with ID {id} not found")
+    except HTTPException:
+        # Re-raise HTTPException to propagate it
+        raise
+    except Exception as e:
+        print(e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+    finally:
+        conn.close()
 
 
 

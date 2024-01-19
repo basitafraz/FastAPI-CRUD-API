@@ -1,15 +1,31 @@
 from typing import Union, Optional
-from fastapi import FastAPI, Body, Response, status, HTTPException
+from fastapi import FastAPI, Body, Response, status, HTTPException, Depends
 from pydantic import BaseModel
 import random
 from psycopg2.extras import RealDictCursor
 import psycopg2
 import time
 from psycopg2 import pool
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String
+from sqlalchemy.orm import relationship
+from fastapi import Depends, FastAPI, HTTPException
+from sqlalchemy.orm import Session
+from . import models
+from .database import SessionLocal, engine, get_db
+
+from .database import Base
+
+models.Base.metadata.create_all(bind=engine)
+
+
+
 
 
 
 app = FastAPI()
+
+
+
 
 
 class Post(BaseModel):
@@ -148,6 +164,11 @@ def delete_post(id: int):
         raise HTTPException(status_code=500, detail="Internal Server Error")
     finally:
         conn.close()
+        
+        
+@app.get("/sqlalchemy")
+def test_posts(db: Session = Depends(get_db)):
+    return {"status": "success"}
 
 
 

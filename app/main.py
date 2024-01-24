@@ -11,6 +11,11 @@ from sqlalchemy.orm import Session
 from . import models, schemas
 from .database import SessionLocal, engine, get_db
 from .database import Base
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from passlib.context import CryptContext
+
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -30,11 +35,6 @@ db_pool = psycopg2.pool.SimpleConnectionPool(
 def get_all_posts(db: Session = Depends(get_db)):
     conn = db_pool.getconn()
     try:
-        # with conn.cursor() as cursor:
-        #     cursor.execute("SELECT * FROM posts")
-        #     posts = cursor.fetchall()
-        #     print(posts)
-        # return {"posts": posts}
         posts = db.query(models.Post).all()
         return posts
     except Exception as e:
@@ -115,4 +115,16 @@ def delete_post(id: int, db: Session = Depends(get_db)):
         
 
 
+@app.post("/users", status_code=status.HTTP_201_CREATED, response_model= schemas.UserOut) 
+def create_user(user: schemas.UserCreate ,db: Session = Depends(get_db)):
+    try:
+        db_user = models.User(**user.dict())
+        db.add(db_user)
+        db.commit()
+        db.refresh(db_user)
+        return db_user
+    except Exception as e:
+        db.rollback()
+        print(e)
+        raise HTTPException(status_code=400, detail="An error occurred while inserting the post.")
 

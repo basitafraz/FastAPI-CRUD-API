@@ -2,13 +2,12 @@ from typing import Union, Optional
 from fastapi import FastAPI, Body, Response, status, HTTPException, Depends
 from psycopg2.extras import RealDictCursor
 import psycopg2
-import time
 from psycopg2 import pool
 from sqlalchemy import Boolean, Column, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy.orm import Session
-from . import models, schemas
+from . import models, schemas, utils
 from .database import SessionLocal, engine, get_db
 from .database import Base
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -118,6 +117,8 @@ def delete_post(id: int, db: Session = Depends(get_db)):
 @app.post("/users", status_code=status.HTTP_201_CREATED, response_model= schemas.UserOut) 
 def create_user(user: schemas.UserCreate ,db: Session = Depends(get_db)):
     try:
+        hashed_password = utils.hash(user.password)
+        user.password = hashed_password
         db_user = models.User(**user.dict())
         db.add(db_user)
         db.commit()

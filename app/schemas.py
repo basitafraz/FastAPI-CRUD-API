@@ -2,6 +2,8 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional
 
 
+
+
     
 class PostBase(BaseModel):
     title: str
@@ -28,8 +30,10 @@ class UserCreate(BaseModel):
 class UserOut(BaseModel):
     email: EmailStr
     name: str
+
+    
     
     class Config:
         from_attributes = True
-  
+    
 

@@ -7,6 +7,7 @@ from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import engine, get_db
+from .. import oAuth2
 
 
 models.Base.metadata.create_all(bind=engine)
@@ -25,7 +26,9 @@ db_pool = psycopg2.pool.SimpleConnectionPool(
 
 
 @router.get("/")
-def get_all_posts(db: Session = Depends(get_db)):
+def get_all_posts(
+    db: Session = Depends(get_db), user_id: int = Depends(oAuth2.get_current_user)
+):
     conn = db_pool.getconn()
     try:
         posts = db.query(models.Post).all()
@@ -40,8 +43,9 @@ def get_all_posts(db: Session = Depends(get_db)):
 @router.post(
     "/", response_model=schemas.PostResponse, status_code=status.HTTP_201_CREATED
 )
-def create_post(post: schemas.PostCreate, db: Session = Depends(get_db)):
+def create_post(post: schemas.PostCreate, db: Session = Depends(get_db), user_id: int = Depends(oAuth2.get_current_user)):
     try:
+        print(user_id)
         db_post = models.Post(**post.dict())
         db.add(db_post)
         db.commit()
@@ -59,7 +63,7 @@ def create_post(post: schemas.PostCreate, db: Session = Depends(get_db)):
     "/update/{id}", response_model=schemas.PostCreate, status_code=status.HTTP_200_OK
 )
 def update_post(
-    id: int, updated_post: schemas.PostCreate, db: Session = Depends(get_db)
+    id: int, updated_post: schemas.PostCreate, db: Session = Depends(get_db), user_id: int = Depends(oAuth2.get_current_user)
 ):
     try:
         # Retrieve the existing post by ID
@@ -82,7 +86,11 @@ def update_post(
 
 
 @router.delete("/delete/{id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_post(id: int, db: Session = Depends(get_db)):
+def delete_post(
+    id: int,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(oAuth2.get_current_user),
+):
     try:
         # Retrieve the existing post by ID
         db_post = db.query(models.Post).filter(models.Post.id == id).first()
@@ -103,7 +111,10 @@ def delete_post(id: int, db: Session = Depends(get_db)):
 
 @router.get("/{id}")
 def get_post(
-    id: int, db: Session = Depends(get_db), response_model=schemas.PostResponse
+    id: int,
+    db: Session = Depends(get_db),
+    response_model=schemas.PostResponse,
+    user_id: int = Depends(oAuth2.get_current_user),
 ):
     try:
         post = db.query(models.Post).filter(models.Post.id == id).first()
